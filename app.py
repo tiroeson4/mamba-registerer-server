@@ -7,6 +7,7 @@ app = Flask(__name__)
 from flask_cors import CORS
 CORS(app)
 
+LOCAL_FILE = "settings.local.json"
 CONFIG_FILE = "settings.json"
 
 # если файла нет — создаём с дефолтными значениями
@@ -22,7 +23,14 @@ if not os.path.exists(CONFIG_FILE):
 
 def read_config():
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if os.path.exists(LOCAL_FILE):
+        with open(LOCAL_FILE, "r", encoding="utf-8") as f:
+            local = json.load(f)
+            # локальный default перекрывает общий
+            if "default" in local:
+                data["default"] = local["default"]
+    return data
 
 def write_config(data):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -59,4 +67,8 @@ def update_profile(pid):
     return jsonify({"status": "ok", "profile": conf["profiles"][pid]})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, debug=False)
+    import os
+
+    port = int(os.environ.get("PORT", 3000))
+    app.run(host="0.0.0.0", port=port)
+
