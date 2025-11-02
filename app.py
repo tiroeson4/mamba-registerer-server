@@ -3,15 +3,13 @@ import json
 import os
 
 app = Flask(__name__)
-
 from flask_cors import CORS
 CORS(app)
 
 CONFIG_FILE = "settings.json"
 LOCAL_FILE = "settings.local.json"
 
-
-# если файла нет — создаём дефолтный
+# Если нет глобального settings.json — создаём дефолтный
 if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump({
@@ -24,10 +22,9 @@ if not os.path.exists(CONFIG_FILE):
 
 
 def read_config():
-    """Читает глобальный конфиг + подмешивает локальный default если есть"""
+    """Чтение глобального settings.json с подменой локального default"""
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
-
     if os.path.exists(LOCAL_FILE):
         try:
             with open(LOCAL_FILE, "r", encoding="utf-8") as f:
@@ -40,6 +37,7 @@ def read_config():
 
 
 def write_config(data):
+    """Запись глобального settings.json"""
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -58,43 +56,6 @@ def update_config():
     return jsonify({"status": "ok"})
 
 
-@app.route("/local-default", methods=["GET"])
-def get_local_default():
-    """Возвращает локальный default, если есть"""
-    if not os.path.exists(LOCAL_FILE):
-        return jsonify({"default": None})
-    try:
-        with open(LOCAL_FILE, "r", encoding="utf-8") as f:
-            local = json.load(f)
-            return jsonify({"default": local.get("default")})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/local-default", methods=["POST"])
-def set_local_default():
-    """Сохраняет локальный default (только на этом ПК)"""
-    data = request.json or {}
-    default_pid = data.get("default")
-
-    if not default_pid:
-        return jsonify({"error": "No default provided"}), 400
-
-    with open(LOCAL_FILE, "w", encoding="utf-8") as f:
-        json.dump({"default": default_pid}, f, ensure_ascii=False, indent=2)
-
-    return jsonify({"status": "ok", "default": default_pid})
-
-
-@app.route("/profile/<pid>", methods=["GET"])
-def get_profile(pid):
-    conf = read_config()
-    prof = conf["profiles"].get(pid)
-    if not prof:
-        return jsonify({"error": "Profile not found"}), 404
-    return jsonify(prof)
-
-
 @app.route("/profile/<pid>", methods=["POST"])
 def update_profile(pid):
     conf = read_config()
@@ -104,6 +65,27 @@ def update_profile(pid):
     conf["profiles"][pid].update(body)
     write_config(conf)
     return jsonify({"status": "ok", "profile": conf["profiles"][pid]})
+
+
+@app.route("/local-default", methods=["GET"])
+def get_local_default():
+    """Возвращает локальный дефолт"""
+    if not os.path.exists(LOCAL_FILE):
+        return jsonify({"default": None})
+    with open(LOCAL_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        return jsonify({"default": data.get("default")})
+
+
+@app.route("/local-default", methods=["POST"])
+def set_local_default():
+    """Сохраняет локальный дефолт — только на этом ПК"""
+    data = request.json or {}
+    if "default" not in data:
+        return jsonify({"error": "Missing 'default'"}), 400
+    with open(LOCAL_FILE, "w", encoding="utf-8") as f:
+        json.dump({"default": data["default"]}, f, ensure_ascii=False, indent=2)
+    return jsonify({"status": "ok", "default": data["default"]})
 
 
 if __name__ == "__main__":
