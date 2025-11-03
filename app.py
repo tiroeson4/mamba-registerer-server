@@ -95,22 +95,23 @@ def debug():
 
 @app.route("/save-position", methods=["POST"])
 def save_position():
-    """Сохраняет координаты панели для конкретного браузера"""
-    data = request.json or {}
-    browser_id = data.get("browser_id")
-    top = data.get("top")
-    left = data.get("left")
-
-    if not browser_id:
+    """Сохраняет координаты панели для конкретного браузера (browser_id)."""
+    data = request.json
+    if not data or "browser_id" not in data:
         return jsonify({"error": "Missing browser_id"}), 400
 
     conf = read_config()
     if "positions" not in conf:
         conf["positions"] = {}
-    conf["positions"][browser_id] = {"top": top, "left": left}
-    write_config(conf)
 
-    return jsonify({"status": "ok", "browser_id": browser_id, "position": conf["positions"][browser_id]})
+    conf["positions"][data["browser_id"]] = {
+        "top": data.get("top", 15),
+        "left": data.get("left", 15)
+    }
+
+    write_config(conf)
+    print(f"💾 Позиция сохранена для {data['browser_id']}: {conf['positions'][data['browser_id']]}")
+    return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
