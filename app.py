@@ -95,23 +95,33 @@ def debug():
 
 @app.route("/save-position", methods=["POST"])
 def save_position():
-    """Сохраняет координаты панели для конкретного браузера (browser_id)."""
+    """Сохраняет координаты панели для конкретного браузера (browser_id)"""
     data = request.json
     if not data or "browser_id" not in data:
         return jsonify({"error": "Missing browser_id"}), 400
 
     conf = read_config()
-    if "positions" not in conf:
+
+    # если нет ключа "positions", создаём
+    if "positions" not in conf or not isinstance(conf["positions"], dict):
         conf["positions"] = {}
 
+    # сохраняем позицию под ID браузера
     conf["positions"][data["browser_id"]] = {
-        "top": data.get("top", 15),
-        "left": data.get("left", 15)
+        "top": float(data.get("top", 15)),
+        "left": float(data.get("left", 15))
     }
 
-    write_config(conf)
-    print(f"💾 Позиция сохранена для {data['browser_id']}: {conf['positions'][data['browser_id']]}")
-    return jsonify({"status": "ok"})
+    # аккуратно сохраняем в файл
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(conf, f, ensure_ascii=False, indent=2)
+        print(f"💾 Позиция сохранена: {data['browser_id']} {conf['positions'][data['browser_id']]}")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"⚠️ Ошибка сохранения позиции: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
