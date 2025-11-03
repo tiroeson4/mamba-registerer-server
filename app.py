@@ -29,8 +29,25 @@ def read_config():
         return json.load(f)
 
 def write_config(data):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Безопасно сохраняет конфиг, не теряя positions"""
+    try:
+        # читаем старый, если есть
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                old = json.load(f)
+        else:
+            old = {}
+
+        # сохраняем существующие позиции, если в новом их нет
+        if "positions" not in data and "positions" in old:
+            data["positions"] = old["positions"]
+
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        print("⚠️ Ошибка при записи settings.json:", e)
+
 
 
 # ---- API ----
