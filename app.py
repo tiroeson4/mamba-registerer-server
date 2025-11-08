@@ -7,6 +7,7 @@ from flask_cors import CORS
 CORS(app)
 
 CONFIG_FILE = "settings.json"
+CITIES_FILE = "cities.txt"
 
 # Если файла нет — создаём дефолтный
 if not os.path.exists(CONFIG_FILE):
@@ -28,27 +29,26 @@ def read_config():
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def write_config(data):
-    """Безопасно сохраняет конфиг, не теряя positions"""
+def write_config(new_data):
+    """Безопасно сохраняет settings.json"""
     try:
-        # читаем старый, если есть
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                old = json.load(f)
+                old_data = json.load(f)
         else:
-            old = {}
+            old_data = {}
 
-        # сохраняем существующие позиции, если в новом их нет
-        if "positions" not in data and "positions" in old:
-            data["positions"] = old["positions"]
+        merged = old_data.copy()
+        for k, v in new_data.items():
+            if isinstance(v, dict) and isinstance(old_data.get(k), dict):
+                merged[k].update(v)
+            else:
+                merged[k] = v
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
+            json.dump(merged, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("⚠️ Ошибка при записи settings.json:", e)
-
-
 
 # ---- API ----
 
@@ -111,6 +111,7 @@ def debug():
     """Отладка — показать текущие defaults и profiles"""
     return jsonify(read_config())
 
+
 @app.route("/save-position", methods=["POST"])
 def save_position():
     """Сохраняет координаты панели для конкретного браузера (browser_id)"""
@@ -124,7 +125,6 @@ def save_position():
     if "positions" not in conf or not isinstance(conf["positions"], dict):
         conf["positions"] = {}
 
-    # сохраняем позицию под ID браузера
     conf["positions"][data["browser_id"]] = {
         "top": float(data.get("top", 15)),
         "left": float(data.get("left", 15))
@@ -140,6 +140,42 @@ def save_position():
         print(f"⚠️ Ошибка сохранения позиции: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+# ✅ Новый маршрут для логгирования городов
+@app.route("/add-city", methods=["POST"])
+def add_city():
+    """Добавляет строку 'город - ID (browser_id)' в cities.txt"""
+    try:
+        data = request.get_json(force=True)
+        name = data.get("name")
+        location = data.get("location")
+        browser_id = data.get("browser_id", "unknown")
+
+        if not name or not location:
+            return jsonify({"error": "missing fields"}), 400
+
+        line = f"{name} - {location} ({browser_id})"
+        print("📍 Новый город:", line)
+
+        if not os.path.exists(CITIES_FILE):
+            open(CITIES_FILE, "w", encoding="utf-8").close()
+
+        with open(CITIES_FILE, "r", encoding="utf-8") as f:
+            existing = f.read().splitlines()
+
+        if line in existing:
+            return jsonify({"status": "duplicate"}), 200
+
+        with open(CITIES_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+        return jsonify({"status": "ok"}), 200
+
+    except Exception as e:
+        print("❌ Ошибка /add-city:", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/")
 def index():
     return "✅ Mamba Registerer server is running!"
@@ -148,5 +184,3 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
-
-
