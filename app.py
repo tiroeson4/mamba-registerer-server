@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import json
 import os
 
@@ -9,7 +9,9 @@ CORS(app)
 CONFIG_FILE = "settings.json"
 CITIES_FILE = "cities.txt"
 
-# Если файла нет — создаём дефолтный
+# ==========================
+# 📁 Инициализация settings.json
+# ==========================
 if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump({
@@ -24,10 +26,14 @@ if not os.path.exists(CONFIG_FILE):
             "global_default": "A"
         }, f, ensure_ascii=False, indent=2)
 
-# ---- вспомогательные функции ----
+
+# ==========================
+# 🔧 Вспомогательные функции
+# ==========================
 def read_config():
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 def write_config(new_data):
     """Безопасно сохраняет settings.json"""
@@ -50,7 +56,10 @@ def write_config(new_data):
     except Exception as e:
         print("⚠️ Ошибка при записи settings.json:", e)
 
-# ---- API ----
+
+# ==========================
+# 🌐 API
+# ==========================
 
 @app.route("/config", methods=["GET"])
 def get_config():
@@ -97,6 +106,7 @@ def set_default():
 
 @app.route("/profile/<pid>", methods=["POST"])
 def update_profile(pid):
+    """Обновляет данные конкретного профиля"""
     conf = read_config()
     body = request.json or {}
     if pid not in conf["profiles"]:
@@ -130,7 +140,7 @@ def save_position():
         "left": float(data.get("left", 15))
     }
 
-    # аккуратно сохраняем в файл
+    # сохраняем
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(conf, f, ensure_ascii=False, indent=2)
@@ -141,7 +151,10 @@ def save_position():
         return jsonify({"error": str(e)}), 500
 
 
-# ✅ Новый маршрут для логгирования городов
+# ==========================
+# 🏙️ Работа с городами
+# ==========================
+
 @app.route("/add-city", methods=["POST"])
 def add_city():
     """Добавляет строку 'город - ID (browser_id)' в cities.txt"""
@@ -176,11 +189,51 @@ def add_city():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/get-cities", methods=["GET"])
+def get_cities():
+    """Возвращает список всех сохранённых городов"""
+    if not os.path.exists(CITIES_FILE):
+        return jsonify({"error": "Файл не найден"}), 404
+
+    with open(CITIES_FILE, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    return jsonify({
+        "cities": lines,
+        "count": len(lines)
+    })
+
+
+@app.route("/download-cities", methods=["GET"])
+def download_cities():
+    """Позволяет скачать файл cities.txt"""
+    if not os.path.exists(CITIES_FILE):
+        return "Файл не найден", 404
+    return send_file(CITIES_FILE, as_attachment=True)
+
+
+@app.route("/clear-cities", methods=["POST"])
+def clear_cities():
+    """Очищает файл cities.txt"""
+    try:
+        open(CITIES_FILE, "w", encoding="utf-8").close()
+        print("🧹 cities.txt очищен.")
+        return jsonify({"status": "cleared"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================
+# 🚀 Индекс
+# ==========================
 @app.route("/")
 def index():
     return "✅ Mamba Registerer server is running!"
 
 
+# ==========================
+# 🖥️ Запуск
+# ==========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
