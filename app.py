@@ -121,6 +121,33 @@ def save_position():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/set-cities", methods=["POST"])
+def set_cities():
+    """Сохраняет список городов для конкретного browser_id"""
+    data = request.json or {}
+    browser_id = data.get("browser_id")
+    cities_text = data.get("cities")
+
+    if not browser_id or not cities_text:
+        return jsonify({"error": "Missing browser_id or cities"}), 400
+
+    city_list = [line.strip() for line in cities_text.splitlines() if line.strip()]
+
+    conf = read_config()
+    if "cities" not in conf:
+        conf["cities"] = {}
+
+    conf["cities"][browser_id] = city_list
+    write_config(conf)
+
+    print(f"🌆 Города обновлены для {browser_id}: {city_list}")
+    return jsonify({"status": "ok", "count": len(city_list)})
+
+
+@app.route("/")
+def index():
+    return "✅ Mamba Registerer server is running!"
+
 @app.route("/")
 def index():
     return "✅ Mamba Registerer server is running!"
