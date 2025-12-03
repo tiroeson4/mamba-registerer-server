@@ -1,201 +1,153 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
-import requests
 import json
+import os
+import requests
+from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
 # === JSONBin config ===
-JSONBIN_ID = "691330e2ae596e708f527e4c"
-JSONBIN_KEY = "$2a$10$gNDyVdYtS5hQ7KoJUKoA6OfTBOXvgoRLWw21WoKorPkb9qIZBB992"
+JSONBIN_ID = os.getenv("JSONBIN_ID")  # берём из переменных окружения
+JSONBIN_KEY = os.getenv("JSONBIN_KEY")
+
+if not JSONBIN_ID or not JSONBIN_KEY:
+  raise RuntimeError("JSONBIN_ID or JSONBIN_KEY is not set in environment")
 
 JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
+
 HEADERS = {
     "X-Master-Key": JSONBIN_KEY,
     "Content-Type": "application/json"
 }
 
-
-# ---------- Вспомогательные функции ----------
-
-def read_db():
-    """Читает текущий конфиг из JSONBin и гарантирует нужные ключи."""
+# ---- вспомогательные функции ----
+def read_config():
+    """Читает текущий конфиг из JSONBin"""
     res = requests.get(JSONBIN_URL, headers=HEADERS)
     res.raise_for_status()
-    data = res.json()["record"]
+    return res.json()["record"]
 
-    # Гарантируем наличие всех секций
-    data.setdefault("profiles", {})
-    data.setdefault("defaults", {})
-    data.setdefault("positions", {})
-    data.setdefault("pending_city", {})
-
-    return data
-
-
-def write_db(db):
-    """Перезаписывает конфиг в JSONBin целиком."""
-    res = requests.put(JSONBIN_URL, headers=HEADERS, json=db)
+def write_config(new_data):
+    """Перезаписывает конфиг в JSONBin целиком"""
+    res = requests.put(JSONBIN_URL, headers=HEADERS, json=new_data)
     res.raise_for_status()
     return res.json()
 
-
-# ---------- API ДЛЯ JS ----------
+# ---- API ----
 
 @app.route("/config", methods=["GET"])
 def get_config():
-    db = read_db()
+    conf = read_config()
     browser_id = request.args.get("browser_id")
+    default_pid = conf.get("global_default", "A")
 
-    # Определяем дефолтный профиль для этого browser_id
-    defaults = db.get("defaults", {})
-    default_pid = defaults.get(browser_id)
-
-    if not default_pid:
-        # если не задано явно, пробуем вытащить из названия (profile_B -> B)
-        if browser_id and browser_id.startswith("profile_"):
-            default_pid = browser_id.split("_", 1)[1]
-        else:
-            default_pid = "A"
+    if browser_id:
+        defaults = conf.get("defaults", {})
+        if browser_id in defaults:
+            default_pid = defaults[browser_id]
 
     return jsonify({
-        "profiles": db.get("profiles", {}),
         "default": default_pid,
-        # JS ждёт positions в формате { "profile_A": {...}, "profile_B": {...} }
-        "positions": db.get("positions", {}),
-        # Python пишет city_id сюда по browser_id
-        "city_id": db.get("pending_city", {}).get(browser_id)
+        "profiles": conf.get("profiles", {}),
+        "positions": conf.get("positions", {}),
+        "cities": conf.get("cities", {})
     })
 
-
-@app.route("/save-position", methods=["POST"])
-def save_position():
-    data = request.json or {}
-    browser_id = data.get("browser_id")
-
-    if not browser_id:
-        return jsonify({"error": "browser_id missing"}), 400
-
-    db = read_db()
-    db.setdefault("positions", {})
-    db["positions"][browser_id] = {
-        "top": float(data.get("top", 15)),
-        "left": float(data.get("left", 15))
-    }
-
-    write_db(db)
-    print(f"💾 Позиция сохранена для {browser_id}: {db['positions'][browser_id]}")
-    return jsonify({"status": "ok"})
 
 
 @app.route("/set-default", methods=["POST"])
 def set_default():
-    """
-    Тело:
-    {
-      "browser_id": "profile_B",
-      "default": "B"
-    }
-    """
+    """Устанавливает дефолтный профиль для конкретного browser_id"""
     data = request.json or {}
     browser_id = data.get("browser_id")
-    default_profile = data.get("default")
+    new_default = data.get("default")
 
-    if not browser_id or not default_profile:
+    if not browser_id or not new_default:
         return jsonify({"error": "browser_id or default missing"}), 400
 
-    db = read_db()
-    db.setdefault("defaults", {})
-    db["defaults"][browser_id] = default_profile
+    conf = read_config()
+    if "defaults" not in conf:
+        conf["defaults"] = {}
 
-    write_db(db)
-    print(f"⭐ Дефолтный профиль для {browser_id}: {default_profile}")
-    return jsonify({"status": "ok"})
+    conf["defaults"][browser_id] = new_default
+    write_config(conf)
+
+    return jsonify({
+        "status": "ok",
+        "browser_id": browser_id,
+        "default": new_default
+    })
 
 
-@app.route("/update-profile", methods=["POST"])
-def update_profile():
-    """
-    Тело:
-    {
-      "pid": "A",
-      "profile": { "name": "Инесса", "age": 28 }
+@app.route("/profile/<pid>", methods=["POST"])
+def update_profile(pid):
+    conf = read_config()
+    body = request.json or {}
+    if pid not in conf["profiles"]:
+        conf["profiles"][pid] = {}
+    conf["profiles"][pid].update(body)
+    write_config(conf)
+    return jsonify({"status": "ok", "profile": conf["profiles"][pid]})
+
+
+@app.route("/debug", methods=["GET"])
+def debug():
+    """Отладка — показать текущие defaults и profiles"""
+    return jsonify(read_config())
+
+@app.route("/save-position", methods=["POST"])
+def save_position():
+    data = request.json
+    if not data or "browser_id" not in data:
+        return jsonify({"error": "Missing browser_id"}), 400
+
+    conf = read_config()
+
+    if "positions" not in conf or not isinstance(conf["positions"], dict):
+        conf["positions"] = {}
+
+    conf["positions"][data["browser_id"]] = {
+        "top": float(data.get("top", 15)),
+        "left": float(data.get("left", 15))
     }
-    """
-    data = request.json or {}
-    pid = data.get("pid")
-    profile_data = data.get("profile")
 
-    if not pid or not profile_data:
-        return jsonify({"error": "pid or profile missing"}), 400
-
-    db = read_db()
-    db.setdefault("profiles", {})
-    db["profiles"][pid] = profile_data
-
-    write_db(db)
-    print(f"👤 Профиль {pid} обновлён: {profile_data}")
-    return jsonify({"status": "ok"})
+    try:
+        write_config(conf)
+        print(f"💾 Позиция сохранена: {data['browser_id']} {conf['positions'][data['browser_id']]}")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"⚠️ Ошибка сохранения позиции: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
-# ---------- API ДЛЯ PYTHON (city_id) ----------
-
-@app.route("/python/set-city-id", methods=["POST"])
-def python_set_city_id():
-    """
-    Тело:
-    {
-      "browser_id": "profile_B",
-      "city_id": "3159_4891_4917_0"
-    }
-    """
-    data = request.json or {}
-    browser_id = data.get("browser_id")
-    city_id = data.get("city_id")
-
-    if not browser_id or not city_id:
-        return jsonify({"error": "browser_id or city_id missing"}), 400
-
-    db = read_db()
-    db.setdefault("pending_city", {})
-    db["pending_city"][browser_id] = city_id
-
-    write_db(db)
-    print(f"📡 PYTHON → JS: city_id={city_id} для {browser_id}")
-    return jsonify({"status": "ok"})
-
-
-@app.route("/python/clear-city-id", methods=["POST"])
-def python_clear_city_id():
-    """
-    Тело:
-    {
-      "browser_id": "profile_B"
-    }
-    """
+@app.route("/set-cities", methods=["POST"])
+def set_cities():
+    """Сохраняет список городов для конкретного browser_id"""
     data = request.json or {}
     browser_id = data.get("browser_id")
+    cities_text = data.get("cities")
 
-    if not browser_id:
-        return jsonify({"error": "browser_id missing"}), 400
+    if not browser_id or not cities_text:
+        return jsonify({"error": "Missing browser_id or cities"}), 400
 
-    db = read_db()
-    if "pending_city" in db and browser_id in db["pending_city"]:
-        del db["pending_city"][browser_id]
-        write_db(db)
-        print(f"🧹 JS → PYTHON: city_id очищен для {browser_id}")
+    city_list = [line.strip() for line in cities_text.splitlines() if line.strip()]
 
-    return jsonify({"status": "ok"})
+    conf = read_config()
+    if "cities" not in conf:
+        conf["cities"] = {}
+
+    conf["cities"][browser_id] = city_list
+    write_config(conf)
+
+    print(f"🌆 Города обновлены для {browser_id}: {city_list}")
+    return jsonify({"status": "ok", "count": len(city_list)})
 
 
 @app.route("/")
 def index():
-    return "✅ JSONBin Mamba Registerer server is running!"
-
+    return "✅ Mamba Registerer server is running!"
 
 if __name__ == "__main__":
-    # На Render порт берётся из переменной окружения, локально можно 3000
-    import os
     port = int(os.environ.get("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
