@@ -148,6 +148,77 @@ def set_cities():
 def index():
     return "✅ Mamba Registerer server is running!"
 
+# Хранилище задач в памяти (для простоты, можно заменить на JSONBin)
+tasks = []
+task_status = {}
+
+@app.route("/add_task", methods=["POST"])
+def add_task():
+    """Добавить задачу для выполнения на ПК"""
+    data = request.json
+    if not data or "action" not in data:
+        return jsonify({"error": "Missing action"}), 400
+    
+    # Генерируем ID задачи
+    task_id = str(int(time.time() * 1000))
+    
+    task = {
+        "id": task_id,
+        "action": data["action"],  # "register"
+        "times": data.get("times", 1),
+        "browser_id": data.get("browser_id", "default"),
+        "status": "pending",
+        "created_at": time.time()
+    }
+    
+    tasks.append(task)
+    task_status[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "total": task["times"],
+        "results": []
+    }
+    
+    print(f"📝 Добавлена задача {task_id}: {task}")
+    return jsonify({"status": "ok", "task_id": task_id})
+
+@app.route("/get_task", methods=["GET"])
+def get_task():
+    """Программа на ПК запрашивает задачу"""
+    if not tasks:
+        return jsonify({"task": None})
+    
+    task = tasks.pop(0)  # Берем первую задачу из очереди
+    print(f"📤 Выдана задача {task['id']} на выполнение")
+    return jsonify({"task": task})
+
+@app.route("/update_task", methods=["POST"])
+def update_task():
+    """Программа на ПК отчитывается о прогрессе"""
+    data = request.json
+    task_id = data.get("task_id")
+    
+    if not task_id or task_id not in task_status:
+        return jsonify({"error": "Invalid task_id"}), 400
+    
+    task_status[task_id]["status"] = data.get("status", "processing")
+    task_status[task_id]["progress"] = data.get("progress", 0)
+    
+    if "result" in data:
+        task_status[task_id]["results"].append(data["result"])
+    
+    print(f"📊 Обновлен статус задачи {task_id}: {task_status[task_id]['progress']}/{task_status[task_id]['total']}")
+    return jsonify({"status": "ok"})
+
+@app.route("/task_status/<task_id>", methods=["GET"])
+def get_task_status(task_id):
+    """Бот или пользователь проверяет статус задачи"""
+    if task_id not in task_status:
+        return jsonify({"error": "Task not found"}), 404
+    
+    return jsonify(task_status[task_id])
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
+
